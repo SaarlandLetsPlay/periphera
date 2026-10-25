@@ -1,0 +1,5 @@
+# periphera: Zugriff für den angemeldeten Benutzer auf HID++-Geräte
+# und die virtuelle Eingabe für Makros (ohne root).
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="046d", TAG+="uaccess"
+SUBSYSTEM=="input", ATTRS{idVendor}=="046d", TAG+="uaccess"
+KERNEL=="uinput", TAG+="uaccess", OPTIONS+="static_node=uinput"

@@ -1,0 +1,10 @@
+# Beispiel-Konfiguration für periphera (nach ~/.config/periphera/macros.toml kopieren).
+#
+# device  : Teil des evdev-Gerätenamens (siehe `periphera keys <Name>`)
+# trigger : Taste oder Maustaste, die das Makro startet (wird nicht weitergeleitet)
+# steps   : "tap KEY_X" (drücken+loslassen), "down KEY_X", "up KEY_X", "wait MS"
+
+[[macro]]
+device  = "Logitech G502 HERO Gaming Mouse Keyboard"
+trigger = "KEY_F13"
+steps   = ["down KEY_LEFTCTRL", "tap KEY_C", "up KEY_LEFTCTRL", "wait 50", "tap KEY_ENTER"]

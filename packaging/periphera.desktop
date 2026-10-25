@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=periphera
+GenericName=Peripherie-Verwaltung
+Comment=Zentrale Verwaltung von Peripheriegeräten (DPI, Beleuchtung, Makros)
+Exec=periphera gui
+Icon=periphera
+Terminal=false
+StartupWMClass=periphera
+Categories=Settings;HardwareSettings;
+Keywords=Maus;Tastatur;DPI;Beleuchtung;Makro;
