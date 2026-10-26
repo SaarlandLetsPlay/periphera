@@ -1,0 +1,33 @@
+# Maintainer: SaarlandLetsPlay
+pkgname=periphera
+pkgver=0.2.0
+pkgrel=1
+pkgdesc="Zentrale Verwaltung von Peripheriegeräten unter Linux: DPI, Beleuchtung mit Effekten und Tastenmakros"
+arch=('x86_64')
+url="https://github.com/SaarlandLetsPlay/periphera"
+license=('MIT')
+depends=('systemd-libs' 'libxkbcommon' 'wayland' 'libx11' 'libxcursor' 'libxi' 'libxrandr' 'mesa' 'fontconfig' 'freetype2')
+makedepends=('cargo' 'git')
+source=("git+$url.git#tag=v$pkgver")
+sha256sums=('SKIP')
+
+prepare() {
+    cd "$pkgname"
+    cargo fetch --locked --target "$CARCH-unknown-linux-gnu"
+}
+
+build() {
+    cd "$pkgname"
+    cargo build --release --locked
+}
+
+package() {
+    cd "$pkgname"
+    install -Dm755 target/release/periphera "$pkgdir/usr/bin/periphera"
+    install -Dm644 packaging/periphera.desktop "$pkgdir/usr/share/applications/periphera.desktop"
+    install -Dm644 packaging/periphera.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/periphera.svg"
+    install -Dm644 packaging/periphera-256.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/periphera.png"
+    install -Dm644 packaging/70-periphera.rules "$pkgdir/usr/lib/udev/rules.d/70-periphera.rules"
+    install -Dm644 packaging/periphera-restore.desktop "$pkgdir/etc/xdg/autostart/periphera-restore.desktop"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
