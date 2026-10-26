@@ -4,7 +4,7 @@
 use crate::input;
 use evdev::{AttributeSet, EventType, InputEvent, KeyCode, uinput::VirtualDevice};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -23,6 +23,7 @@ pub struct MacroDef {
     /// Teil des evdev-Gerätenamens, z. B. "G502 HERO Gaming Mouse Keyboard".
     pub device: String,
     /// Auslösende Taste oder Maustaste, z. B. "BTN_SIDE" oder "KEY_F13".
+    /// Mehrere Tasten gleichzeitig gedrückt: "KEY_F3+KEY_F4".
     pub trigger: String,
     /// Schritte: "tap KEY_C", "down KEY_LEFTCTRL", "up KEY_LEFTCTRL", "wait 100" (ms).
     pub steps: Vec<String>,
@@ -67,7 +68,8 @@ enum Step {
 
 /// Ein gebundenes, geprüftes Makro.
 struct Bound {
-    trigger: u16,
+    /// Auslösende Tasten; ausgelöst wird, wenn alle gleichzeitig gehalten werden.
+    triggers: Vec<u16>,
     steps: Vec<Step>,
     busy: AtomicBool,
 }
@@ -127,7 +129,12 @@ fn run_steps(virt: &Mutex<VirtualDevice>, steps: &[Step]) -> Result<(), Box<dyn 
 /// Bedient ein Gerät: grabt es, leitet Ereignisse weiter und startet Makros bei Auslösung.
 fn serve(device: String, bindings: Vec<Arc<Bound>>) -> Result<(), Box<dyn Error>> {
     let (path, mut dev) = input::find(&device).ok_or_else(|| format!("kein evdev-Gerät mit '{device}'"))?;
-    dev.grab()?;
+    // Mäuse (haben Relativachsen) werden nicht gegrabbt: sonst fiele die Bewegung weg, weil das
+    // virtuelle Gerät keine Relativachsen hat. Auslöser-Tasten gehen dort also zusätzlich ans System.
+    let is_mouse = dev.supported_relative_axes().is_some();
+    if !is_mouse {
+        dev.grab()?;
+    }
 
     let mut keys = AttributeSet::<KeyCode>::new();
     for c in key_table().values() {
@@ -138,25 +145,44 @@ fn serve(device: String, bindings: Vec<Arc<Bound>>) -> Result<(), Box<dyn Error>
     ));
     println!("Aktiv: {} ({}), {} Makro(s)", dev.name().unwrap_or("?"), path.display(), bindings.len());
 
+    let trigger_keys: HashSet<u16> = bindings.iter().flat_map(|b| b.triggers.iter().copied()).collect();
+    let mut held: HashSet<u16> = HashSet::new();
     loop {
         for ev in dev.fetch_events()? {
-            if ev.event_type() == EventType::KEY {
-                if let Some(b) = bindings.iter().find(|b| b.trigger == ev.code()) {
-                    // Auslöser komplett schlucken (Druck, Wiederholung, Loslassen).
-                    if ev.value() == 1 && !b.busy.swap(true, Ordering::SeqCst) {
-                        let b = Arc::clone(b);
-                        let virt = Arc::clone(&virt);
-                        thread::spawn(move || {
-                            if let Err(e) = run_steps(&virt, &b.steps) {
-                                eprintln!("Makro-Fehler: {e}");
+            if ev.event_type() == EventType::KEY && trigger_keys.contains(&ev.code()) {
+                // Auslöser-Tasten komplett schlucken (Druck, Wiederholung, Loslassen).
+                match ev.value() {
+                    1 => {
+                        held.insert(ev.code());
+                        // Das Makro mit den meisten Tasten gewinnt, wenn mehrere passen.
+                        let fire = bindings
+                            .iter()
+                            .filter(|b| b.triggers.contains(&ev.code()) && b.triggers.iter().all(|t| held.contains(t)))
+                            .max_by_key(|b| b.triggers.len());
+                        if let Some(b) = fire {
+                            if !b.busy.swap(true, Ordering::SeqCst) {
+                                println!("Auslöser {} erkannt, Makro startet", input::key_name(ev.code()));
+                                let b = Arc::clone(b);
+                                let virt = Arc::clone(&virt);
+                                thread::spawn(move || {
+                                    if let Err(e) = run_steps(&virt, &b.steps) {
+                                        eprintln!("Makro-Fehler: {e}");
+                                    }
+                                    b.busy.store(false, Ordering::SeqCst);
+                                });
                             }
-                            b.busy.store(false, Ordering::SeqCst);
-                        });
+                        }
                     }
-                    continue;
+                    0 => {
+                        held.remove(&ev.code());
+                    }
+                    _ => {}
                 }
+                continue;
             }
-            virt.lock().unwrap().emit(&[ev])?;
+            if !is_mouse {
+                virt.lock().unwrap().emit(&[ev])?;
+            }
         }
     }
 }
@@ -172,9 +198,14 @@ fn load(path: &str) -> Result<HashMap<String, Vec<Arc<Bound>>>, Box<dyn Error>> 
     let keys = key_table();
     let mut groups: HashMap<String, Vec<Arc<Bound>>> = HashMap::new();
     for m in cfg.macros {
-        let trigger = *keys
-            .get(&m.trigger)
-            .ok_or_else(|| format!("unbekannte Auslösetaste '{}'", m.trigger))?;
+        let triggers = m
+            .trigger
+            .split('+')
+            .map(|t| {
+                let t = t.trim();
+                keys.get(t).copied().ok_or_else(|| format!("unbekannte Auslösetaste '{t}'"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let steps = m
             .steps
             .iter()
@@ -183,7 +214,7 @@ fn load(path: &str) -> Result<HashMap<String, Vec<Arc<Bound>>>, Box<dyn Error>> 
         groups
             .entry(m.device)
             .or_default()
-            .push(Arc::new(Bound { trigger, steps, busy: AtomicBool::new(false) }));
+            .push(Arc::new(Bound { triggers, steps, busy: AtomicBool::new(false) }));
     }
     Ok(groups)
 }
@@ -193,7 +224,8 @@ pub fn check(path: &str) -> Result<(), Box<dyn Error>> {
     for (device, bindings) in load(path)? {
         println!("Gerät '{device}': {} Makro(s)", bindings.len());
         for b in &bindings {
-            println!("  Auslöser {} -> {} Schritt(e)", input::key_name(b.trigger), b.steps.len());
+            let names: Vec<String> = b.triggers.iter().map(|&t| input::key_name(t)).collect();
+            println!("  Auslöser {} -> {} Schritt(e)", names.join(" + "), b.steps.len());
         }
     }
     println!("Konfiguration OK");

@@ -158,3 +158,40 @@ impl Hidpp {
         self.call(feature_id, func, params)
     }
 }
+
+/// Nur-Lese-Probe: liest alle HID++-Meldungen der Logitech-Geräte für `seconds` Sekunden mit
+/// und gibt sie roh aus. Schreibt nichts an die Geräte.
+pub fn listen_raw(api: &HidApi, seconds: u64) -> Result<(), Box<dyn Error>> {
+    let paths: Vec<_> = api
+        .device_list()
+        .filter(|d| d.vendor_id() == VENDOR_ID && HIDPP_USAGE_PAGES.contains(&d.usage_page()))
+        .map(|d| (d.product_string().unwrap_or("?").to_string(), d.path().to_owned()))
+        .collect();
+    let mut devs = Vec::new();
+    for (name, path) in paths {
+        match api.open_path(&path) {
+            Ok(dev) => {
+                dev.set_blocking_mode(false)?;
+                println!("Lese: {name}");
+                devs.push((name, dev));
+            }
+            Err(e) => println!("Konnte {name} nicht öffnen: {e}"),
+        }
+    }
+    println!("Jetzt die Extratasten drücken ({seconds} s) …");
+    let start = std::time::Instant::now();
+    let end = start + std::time::Duration::from_secs(seconds);
+    let mut buf = [0u8; 64];
+    while std::time::Instant::now() < end {
+        for (name, dev) in &devs {
+            let n = dev.read(&mut buf)?;
+            if n > 0 {
+                let hex: Vec<String> = buf[..n].iter().map(|b| format!("{b:02x}")).collect();
+                println!("{:>7} ms  {name}: {}", start.elapsed().as_millis(), hex.join(" "));
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    println!("Ende.");
+    Ok(())
+}
