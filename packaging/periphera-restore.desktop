@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=periphera Einstellungen wiederherstellen
+Comment=Stellt DPI und Beleuchtung der Logitech-Geräte nach dem Anmelden wieder her
+Exec=periphera restore
+Icon=periphera
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

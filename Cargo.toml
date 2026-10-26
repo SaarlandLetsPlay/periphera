@@ -27,4 +27,5 @@ assets = [
     ["packaging/periphera.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
     ["packaging/periphera-256.png", "usr/share/icons/hicolor/256x256/apps/periphera.png", "644"],
     ["packaging/70-periphera.rules", "usr/lib/udev/rules.d/", "644"],
+    ["packaging/periphera-restore.desktop", "etc/xdg/autostart/", "644"],
 ]
